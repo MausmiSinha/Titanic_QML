@@ -72,21 +72,6 @@ plot_histogram(counts)
 # of image 
 print(qc.draw(output='text'))
 
-# Building a simple Parametrized Quantum Circuit(PQC) Classifier
-def pqc_classify(backend, passenger_state):
-    '''backend -- a qiskit backend to run the quantum circuit at 
-       passenger_state -- a valid quantum state vector'''
-    
-    qc = QuantumCircuit(1)
-    qc.initialize(passenger_state, 0)
-    # Measure the qubit
-    qc.measure_all()
-
-    # run the quantum circuit and get the counts, these are either {'0':1} or {'1':1}
-    result = execute(qc, backend).result().get_counts(qc)
-
-    # get the bit 0 or 1
-    return int(list(map(lambda item: item[0], counts.items()))[0])
 
 train = pd.read_csv('train.csv')
 test = pd.read_csv('test.csv')
@@ -151,11 +136,44 @@ def specificity(matrix):
 def npv(matrix):
     return matrix[0][0]/(matrix[0][1]+ matrix[1][0]) if (matrix[0][1]+ matrix[1][0] > 0) else 0
 
+# Pre-Processing
+def pre_process(passenger):
+    '''
+        passenger -- the normalized(array of numeric data) passenger data
+        returns a valid quantum state 
+    '''
+    quantum_state = [1/sqrt(2), 1/sqrt(2)]
+    return quantum_state
+ 
+# Building a simple Parametrized Quantum Circuit(PQC) Classifier
+def pqc_classify(backend, quantum_state):
+    '''backend -- a qiskit backend to run the quantum circuit at 
+       passenger_state -- a valid quantum state vector'''
+    
+    qc = QuantumCircuit(1)
+    qc.initialize(quantum_state, 0)
+    # Measure the qubit
+    qc.measure_all()
+
+    # run the quantum circuit and get the counts, these are either {'0':1} or {'1':1}
+    result = execute(qc, backend).result().get_counts(qc)
+    return result
+
+    
+def post_processing(counts):
+    """
+    counts -- the result of the quantum circuit execution
+    returns the prediction
+    """
+    # get the bit 0 or 1
+    return int(list(map(lambda item: item[0], counts.items()))[0])
+
+
 # Creating Classifier Report function
 def classifier_report(name, run, classify, input, labels):
     print(name)
     cr_prediction = run(classify, input)
-    cr_cm = confusion_matrix(labels, input)
+    cr_cm = confusion_matrix(labels, cr_prediction)
 
     cr_precision = precision_score(labels, cr_prediction)
     cr_recall = recall_score(labels, cr_prediction)
@@ -177,8 +195,79 @@ def classifier_report(name, run, classify, input, labels):
 # Specify the quantum state that results in either 0 or 1
 initial_state = [1/sqrt(2), 1/sqrt(2)] 
 
-classifier_report("Random PQC",
+classifier_report("Variational",
                   run,
-                  lambda passenger: pqc_classify(backend, initial_state),
+                  lambda passenger: post_processing(pqc_classify(backend, pre_process(passenger))),
                   train_input,
                   train_labels)
+
+# Define weight and feature 
+def weigh_feature(feature, weight):
+    '''
+    Feature -- the single value of a passenger's feature
+    weight -- overall weight of this feature
+    returns the weighted feature 
+    '''
+    return feature*weight
+
+from functools import reduce
+
+def get_overall_prob(features, weights):
+    '''
+    Features -- list of features of passenger
+    Weights -- list of all features' weight 
+    '''
+
+    return reduce(
+        lambda result, data: result+ weigh_feature(*data),
+        zip(features, weights),
+        0
+    )
+
+
+# Calculating Corelation coefficients
+from scipy.stats import spearmanr
+
+# seperate the training data into a list of the columns
+columns = [list(map(lambda passenger: passenger[i], train_input)) for i in range(0,7)]
+
+# calculate the correlation coefficient for each column 
+corelations = list(map(lambda col: spearmanr(col, train_labels)[0], columns))
+print(corelations)
+
+# Calculating theta based on the probabilities calculated
+def get_state(theta):
+    '''
+    returns a valid state vector from angle theta
+    '''
+    return [cos(theta/2), sin(theta/2)]
+
+def pre_process_weight(passenger):
+    '''
+        passenger -- the normalized (array of numeric data) passenger data
+        returns a valid quantum state
+    '''
+
+    # Calculate the overall probability
+    mu = get_overall_prob(passenger, corelations)
+
+    # theta between 0 (|0>) and pi (|1>)
+    quantum_state = get_state((1-mu)*pi)
+
+    return quantum_state
+
+# Running the PQC classifier report with the weighted pre-processing
+classifier_report(
+    "Variational-Test",
+    run, 
+    lambda passenger: post_processing(pqc_classify(backend, pre_process_weight(passenger))),
+    test_input,
+    test_labels
+)
+
+# Calculating the probability of survival
+survivors = train[train.Survived.eq(1)]
+
+prob_survival = len(survivors)/len(train)
+
+print('P(Survivors) is {:.2f}'.format(prob_survival))
