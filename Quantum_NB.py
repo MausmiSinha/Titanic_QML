@@ -1,4 +1,9 @@
 import pandas as pd
+from functools import reduce
+from qiskit import QuantumCircuit,Aer, execute, ClassicalRegister, QuantumRegister
+from math import asin, sqrt, ceil
+from qiskit.visualization import plot_histogram
+import matplotlib.pyplot as plt
 train = pd.read_csv('train.csv')
 
 # Size
@@ -49,4 +54,30 @@ def pre_process(passenger):
         get_modifier_sex(passenger["Sex"]),
     ]
     
-# a female passenger 
+# a female passenger with 1st class ticket
+print(pre_process(train.iloc[52]))
+
+# a male passengerwith third class ticket 
+print(pre_process(train.iloc[26]))
+
+# Convert psi value to theta value
+def prob_to_angle(prob):
+    return 2*asin(sqrt(prob))
+
+def pqc(backend, prior, modifier, shots=1, hist=False, measure = False):
+    # prepare circuit with QUBIT and a classical bit to hold measurement
+    qr = QuantumRegister(7)
+    cr = ClassicalRegister(1)
+    qc = QuantumCircuit(qr, cr) if measure else QuantumCircuit(qr)
+
+    # insert quantum circuit
+    qc = QuantumCircuit(4)
+
+    # Measure qubit only if we want to measure 
+    if measure:
+        qc.measure(qr[0], cr[0])
+    results = execute(qc,backend, shots=shots).result().get_counts()
+    return plot_histogram(results, figsize=(12,4)) if hist else results
+
+# caption the basic function
+qc=QuantumCircuit(7)
