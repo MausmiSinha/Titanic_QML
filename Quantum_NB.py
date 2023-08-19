@@ -131,3 +131,12 @@ def pqc(backend, prior, modifier, shots=1, hist=False, measure = False):
         qc.measure(qr[0], cr[0])
     results = execute(qc,backend, shots=shots).result().get_counts()
     return plot_histogram(results, figsize=(12,4)) if hist else results
+
+# Post processig function
+def post_process(counts):
+    """
+    counts -- the result of the quantum circuit execute
+    returns the prediction
+    """
+
+    return int(list(map(lambda item: item[0], counts.items()))[0])
