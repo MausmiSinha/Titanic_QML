@@ -3,6 +3,7 @@ from functools import reduce
 from qiskit import QuantumCircuit,Aer, execute, ClassicalRegister, QuantumRegister
 from math import asin, sqrt, ceil
 from qiskit.visualization import plot_histogram
+from sklearn.metrics import recall_score, precision_score, confusion_matrix
 import matplotlib.pyplot as plt
 train = pd.read_csv('train.csv')
 
@@ -138,5 +139,49 @@ def post_process(counts):
     counts -- the result of the quantum circuit execute
     returns the prediction
     """
-
     return int(list(map(lambda item: item[0], counts.items()))[0])
+
+# Defining the run function
+def run(f_classify, data):
+    return [f_classify(data.iloc[i]) for i in range(0, len(data))]
+
+# Specifing re-usable backend
+backend = Aer.get_backend('qasm_simulator')
+
+# Specificity
+def specificity(matrix):
+    return matrix[0][0]/(matrix[0][0]+ matrix[0][1]) if (matrix[0][0]+matrix[0][1]>0) else 0
+
+# Negative Predictive Value(NPV)
+def npv(matrix):
+    return matrix[0][0]/(matrix[0][1]+ matrix[1][0]) if (matrix[0][1]+ matrix[1][0] > 0) else 0
+
+# Creating Classifier Report function
+def classifier_report(name, run, classify, input, labels):
+    print(name)
+    cr_prediction = run(classify, input)
+    cr_cm = confusion_matrix(labels, cr_prediction)
+
+    cr_precision = precision_score(labels, cr_prediction)
+    cr_recall = recall_score(labels, cr_prediction)
+    cr_specificity = specificity(cr_cm)
+    cr_npv = npv(cr_cm)
+    cr_level = 0.25 * (cr_precision + cr_recall + cr_specificity + cr_npv)
+
+    print('The precision score of the {} classifier is {:.2f}'
+        .format(name, cr_precision))
+    print('The recall score of the {} classifier is {:.2f}'
+        .format(name, cr_recall))
+    print('The specificity score of the {} classifier is {:.2f}'
+        .format(name, cr_specificity))
+    print('The npv score of the {} classifier is {:.2f}'
+        .format(name, cr_npv))
+    print('The information level is: {:.2f}'
+        .format(cr_level))
+    
+classifier_report("Quantum Naive Bayes Classifier",
+                  run,
+                  lambda passenger: post_process(pqc(backend, prob_survival, pre_process(passenger), measure=True, hist=False)),
+                  train,
+                  train['Survived']
+                  )
