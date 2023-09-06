@@ -25,6 +25,14 @@ def log_liklihood(Data, prob_a_b, prob_a_nb, prob_na_b, prob_na_nb):
         
     return sum(map(get_prob, Data))
 
+# Defining the CCRY‐gate
+def ccry(qc, theta, control1, control2, controlled):
+    qc.cry(theta/2, control2, controlled)
+    qc.cx(control1, control2)
+    qc.cry(-theta/2, control2, controlled)
+    qc.cx(control1, control2)
+    qc.cry(theta/2, control1, controlled)
+
 def prob_to_angle(prob):
     return 2*asin(sqrt(prob))
 
@@ -108,7 +116,7 @@ p_female = len(population_female)/len(train)
 QPOS_ISCHILD = 0
 QPOS_SEX = 1
 
-def apply_ischild_sec(qc):
+def apply_ischild_sex(qc):
     # set marginal probability of IsChild
     qc.ry(prob_to_angle(p_child), QPOS_ISCHILD)
 
@@ -155,3 +163,115 @@ def apply_norm(qc, norm_params):
     ccry(qc, prob_to_angle(
         norm_params['p_norm_cf']
     ),QPOS_ISCHILD, QPOS_SEX, QPOS_NORM)
+
+# Calculating the Probabilities Related to the Ticket Class
+pop_first = train[train.Pclass.eq(1)]
+surv_first = round(len(pop_first[pop_first.Survived.eq(1)])/len(pop_first), 2)
+p_first = round(len(pop_first)/len(train),2)
+
+pop_second = train[train.Pclass.eq(2)]
+surv_second = round(len(pop_second[pop_second.Survived.eq(1)])/len(pop_second), 2)
+p_second = round(len(pop_second)/len(train),2)
+
+pop_third = train[train.Pclass.eq(3)]
+surv_third = round(len(pop_third[pop_third.Survived.eq(1)])/len(pop_third), 2)
+p_third = round(len(pop_third)/len(train),2)
+
+print("First class: {} of the passengers, survived: {}".format(p_first,surv_first))
+print("Second class: {} of the passengers, survived: {}".format(p_second,surv_second))
+print("Third class: {} of the passengers, survived: {}".format(p_third,surv_third))
+
+# Representing the ticket‐class
+# positions of the qubits
+QPOS_FIRST = 3
+QPOS_SECOND = 4
+QPOS_THIRD = 5
+
+def apply_class(qc):
+    # set the marginal probability of pclass = 1st
+    qc.ry(prob_to_angle(p_first), QPOS_FIRST)
+
+    qc.x(QPOS_FIRST)
+    # Set the marginal probability of pclass=2nd
+    qc.cry(prob_to_angle(p_second/(1-p_first)), QPOS_FIRST, QPOS_SECOND)
+
+    # Set the marginal probability of pclass=3rd
+    qc.x(QPOS_SECOND)
+    ccry(qc, prob_to_angle(p_third/(1-p_first-p_second)), QPOS_FIRST, QPOS_SECOND, QPOS_THIRD)
+    qc.x(QPOS_SECOND)
+    qc.x(QPOS_FIRST)
+
+# Listing Represent survival
+# position of the qubit
+QPOS_SURV = 6
+
+def apply_survival(qc, surv_params):    
+    """
+    surv_params = {
+        'p_surv_f1': 0.3,
+        'p_surv_f2': 0.4,
+        'p_surv_f3': 0.5,
+        'p_surv_u1': 0.6,
+        'p_surv_u2': 0.7,
+        'p_surv_u3': 0.8
+    }
+    """
+
+    # set the conditional probability of Survival given unfavored by norm
+    qc.x(QPOS_NORM)
+    ccry(qc, prob_to_angle(
+        surv_params['p_surv_u1']
+    ),QPOS_NORM, QPOS_FIRST, QPOS_SURV)
+
+    ccry(qc, prob_to_angle(
+        surv_params['p_surv_u2']
+    ),QPOS_NORM, QPOS_SECOND, QPOS_SURV)
+
+    ccry(qc, prob_to_angle(
+        surv_params['p_surv_u3']
+    ),QPOS_NORM, QPOS_THIRD, QPOS_SURV)
+    qc.x(QPOS_NORM)
+
+    # set the conditional probability of Survival given favored by norm
+    ccry(qc, prob_to_angle(
+        surv_params['p_surv_f1']
+    ),QPOS_NORM, QPOS_FIRST, QPOS_SURV)
+
+    ccry(qc, prob_to_angle(
+        surv_params['p_surv_f2']
+    ),QPOS_NORM, QPOS_SECOND, QPOS_SURV)
+
+    ccry(qc, prob_to_angle(
+        surv_params['p_surv_f3']
+    ),QPOS_NORM, QPOS_THIRD, QPOS_SURV)
+
+# The quantum Bayesian network
+QUBITS = 7
+
+def qbn_titanic(norm_params, surv_params, hist=True, measure=False, shots = 1):
+    def circuit(qc, qr= None, cr = None):
+        apply_ischild_sex(qc)
+        apply_norm(qc, norm_params)
+        apply_class(qc)
+        apply_survival(qc, surv_params)
+
+    return as_pqc(QUBITS, circuit, hist= hist, measure=measure, shots=shots)
+
+# Trying the QBN
+norm_params = {
+    'p_norm_am': 0.25,
+    'p_norm_af': 0.35,
+    'p_norm_cm': 0.45,
+    'p_norm_cf': 0.55
+}
+
+surv_params = {
+    'p_surv_f1': 0.3,
+    'p_surv_f2': 0.4,
+    'p_surv_f3': 0.5,
+    'p_surv_u1': 0.6,
+    'p_surv_u2': 0.7,
+    'p_surv_u3': 0.8
+}
+
+qbn_titanic(norm_params, surv_params, hist=True)
