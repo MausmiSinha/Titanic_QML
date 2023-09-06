@@ -326,3 +326,56 @@ def calculate_surv_params(passengers):
     }
 
     return surv_params
+
+# Prepare the Data
+def prepare_data(passengers, params):
+    """
+    params = {
+        'p_norm_cms': 0.45,
+        'p_norm_cmd': 0.46,
+        'p_norm_cfs': 0.47,
+        'p_norm_cfd': 0.48,
+        'p_norm_ams': 0.49,
+        'p_norm_amd': 0.51,
+        'p_norm_afs': 0.52,
+        'p_norm_afd': 0.53,
+    }
+    """
+
+    # is the passenger a child?
+    passengers['IsChild'] = passengers['Age'].map(lambda age: 0 if age>max_child_age else 1)
+
+    # the probability of the favored by norm given Age, Sex and Survival
+    passengers['Norm']= list(map(
+        lambda item: params['p_norm_{}{}{}'.format(
+            'a' if item[0] == 0 else 'c',
+            item[1][0],
+            'd' if item[2] == 0 else 's'
+        )],
+        list(zip(passengers['IsChild'], passengers['Sex'],passengers['Survived']))
+    ))
+
+    return passengers
+
+# Listing Initialize the parameters
+# Step 0: Initialize the parameter values 
+params = {
+    'p_norm_cms': 0.45,
+    'p_norm_cmd': 0.46,
+    'p_norm_cfs': 0.47,
+    'p_norm_cfd': 0.48,
+    'p_norm_ams': 0.49,
+    'p_norm_amd': 0.51,
+    'p_norm_afs': 0.52,
+    'p_norm_afd': 0.53,
+}
+
+# Listing Run the qbn
+passengers = prepare_data(train, params)
+results = qbn_titanic(calculate_norm_params(passengers), calculate_surv_params(passengers), hist=False)
+
+def filter_states(states, position, value):
+    return list(filter(lambda item: item[0][QUBITS-1-position] == str(value), states))
+
+# The sum of all these states depict the marginal probability of survival.
+print(filter_states(results.items(), QPOS_SURV, '1'))
