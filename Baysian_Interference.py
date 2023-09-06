@@ -275,3 +275,54 @@ surv_params = {
 }
 
 qbn_titanic(norm_params, surv_params, hist=True)
+
+# Calculating the parameters of the norm
+def calculate_norm_params(passengers):
+    # the different population in our data 
+    pop_children = passengers[passengers.IsChild.eq(1)]
+    pop_adult = passengers[passengers.IsChild.eq(0)]
+
+    # Combination of being a child and gender
+    pop_am = pop_adult[pop_adult.Sex.eq('male')]
+    pop_af = pop_adult[pop_adult.Sex.eq('female')]
+    pop_cm = pop_children[pop_children.Sex.eq('male')]
+    pop_cf = pop_children[pop_children.Sex.eq('female')]
+
+    norm_params = {
+        'p_norm_am': pop_am.Norm.sum() / len(pop_am),
+        'p_norm_af': pop_af.Norm.sum() / len(pop_af),
+        'p_norm_cm': pop_cm.Norm.sum() / len(pop_cm),
+        'p_norm_cf': pop_cf.Norm.sum() / len(pop_cf)
+    }
+
+    return norm_params
+
+# Calculating the parameters of survival
+def calculate_surv_params(passengers):
+    # all survivors
+    survivors = passengers[passengers.Survived.eq(1)]
+
+    # weight the passenger
+    def weight_passenger(norm, pclass):
+        return lambda passenger: (passenger[0] if norm else 1-passenger[0])*(1 if passenger[1] == pclass else 0)
+
+    # calculate the probability to survive 
+    def calc_prob(norm, pclass):
+        return sum(list(map(
+            weight_passenger(norm, pclass),
+            list(zip(survivors['Norm'], survivors['Pclass']))
+        )))/sum(list(map(
+            weight_passenger(norm, pclass),
+            list(zip(passengers['Norm'],passengers['Pclass']))
+        )))
+    
+    surv_params = {
+        'p_surv_f1': calc_prob(True, 1),
+        'p_surv_f2': calc_prob(True, 2),
+        'p_surv_f3': calc_prob(True, 3),
+        'p_surv_u1': calc_prob(False, 1),
+        'p_surv_u2': calc_prob(False, 2),
+        'p_surv_u3': calc_prob(False, 3)
+    }
+
+    return surv_params
