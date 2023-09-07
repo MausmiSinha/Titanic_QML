@@ -379,3 +379,21 @@ def filter_states(states, position, value):
 
 # The sum of all these states depict the marginal probability of survival.
 print(filter_states(results.items(), QPOS_SURV, '1'))
+
+# Calculating the marginal prob. to survival
+def sum_states(states):
+    return sum(map(lambda item: item[1], states))
+
+print(sum_states(filter_states(results.items(), QPOS_SURV, '1')))
+
+# Log_likelihood function adapted for our data
+def log_likelihood_titanic(data, results):
+    states = results.items()
+
+    def calc_prob(norm_val, ischild_val, sex_val, surv_val):
+        return sum_states(filter_states(filter_states(
+            filter_states(filter_states(states, QPOS_SEX, sex_val), 
+                          QPOS_ISCHILD, ischild_val),
+                            QPOS_SURV, surv_val), 
+                                QPOS_NORM, norm_val
+            ))
