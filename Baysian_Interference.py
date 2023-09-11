@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from math import asin, sqrt
 from math import log
 import pandas as pd
+from sklearn.metrics import confusion_matrix, precision_score, recall_score
 
 # Dataset with missing value
 Data = [(1, 1), (1, 1), (0, 0), (0, 0), (0, 0), (0, None), (0, 1), (1, 0)]
@@ -397,3 +398,182 @@ def log_likelihood_titanic(data, results):
                             QPOS_SURV, surv_val), 
                                 QPOS_NORM, norm_val
             ))
+    
+    probs = {
+        'p_fcms': calc_prob('1', '1', '0', '1'),
+        'p_fcmd': calc_prob('1', '1', '0', '0'),
+        'p_fcfs': calc_prob('1', '1', '1', '1'),
+        'p_fcfd': calc_prob('1', '1', '1', '0'),
+        'p_fams': calc_prob('1', '0', '0', '1'),
+        'p_famd': calc_prob('1', '0', '0', '0'),
+        'p_fafs': calc_prob('1', '0', '1', '1'),
+        'p_fafd': calc_prob('1', '0', '1', '0'),
+        'p_ucms': calc_prob('0', '1', '0', '1'),
+        'p_ucmd': calc_prob('0', '1', '0', '0'),
+        'p_ucfs': calc_prob('0', '1', '1', '1'),
+        'p_ucfd': calc_prob('0', '1', '1', '0'),
+        'p_uams': calc_prob('0', '0', '0', '1'),
+        'p_uamd': calc_prob('0', '0', '0', '0'),
+        'p_uafs': calc_prob('0', '0', '1', '1'),
+        'p_uafd': calc_prob('0', '0', '1', '0'),
+    }
+
+    return round(sum(map(lambda item: log(probs['p_{}{}{}{}'.format(
+        'u', 'a' if item[1] == 0 else 'c',
+        item[2][0], 'd' if item[3] == 0 else 's'
+    )] + probs['p_{}{}{}{}'.format(
+        'u', 'a' if item[1] == 0 else 'c',
+        item[2][0], 'd' if item[3] == 0 else 's')]
+    ),
+    list(zip(data['Norm'], data['IsChild'], data['Sex'], data['Survived'] ))
+    )), 3)
+
+# Calculating the log-Likelihood 
+print(log_likelihood_titanic(train, results))
+
+def to_params(results):
+    states = results.items()
+    
+    def calc_norm(ischild_val, sex_val, surv_val):
+        pop = filter_states(filter_states(filter_states(states, QPOS_SEX, sex_val), QPOS_ISCHILD, ischild_val), QPOS_SURV, surv_val)
+
+        p_norm = sum(map(lambda item: item[1], filter_states(pop, QPOS_NORM, '1')))
+        p_total = sum(map(lambda item: item[1], pop))
+        return p_norm / p_total
+
+
+    return {
+        'p_norm_cms': calc_norm('1', '0', '1'),
+        'p_norm_cmd': calc_norm('1', '0', '0'),
+        'p_norm_cfs': calc_norm('1', '1', '1'),
+        'p_norm_cfd': calc_norm('1', '1', '0'),
+        'p_norm_ams': calc_norm('0', '0', '1'),
+        'p_norm_amd': calc_norm('0', '0', '0'),
+        'p_norm_afs': calc_norm('0', '1', '1'),
+        'p_norm_afd': calc_norm('0', '1', '0'),
+    }
+
+# Calculating new parameter
+print(to_params(results))
+
+# Listing The recursive training automatism
+def train_qbn_titanic(passengers, params, iterations):
+    if iterations > 0:
+        new_params = train_qbn_titanic(passengers, params, iterations - 1)
+
+        passengers = prepare_data(passengers, new_params)
+        results = qbn_titanic(calculate_norm_params(passengers), calculate_surv_params(passengers), hist=False)
+
+        print ('The log-likelihood after {} iteration(s) is {}'.format(iterations, log_likelihood_titanic(passengers, results)))
+        return to_params(results)
+    
+    return params
+
+# Training the qbn
+trained_params = train_qbn_titanic(train, {
+    'p_norm_cms': 0.45,
+    'p_norm_cmd': 0.46,
+    'p_norm_cfs': 0.47,
+    'p_norm_cfd': 0.48,
+    'p_norm_ams': 0.49,
+    'p_norm_amd': 0.51,
+    'p_norm_afs': 0.52,
+    'p_norm_afd': 0.53,
+}, 25)
+
+print(trained_params)
+
+# Pre Process
+def pre_process(passenger):
+    return (passenger['IsChild'] == 1, passenger['Sex'] == 'female', passenger['Pclass'])
+
+# Applying the kniown data on quantum circuit
+def apply_known(qc, is_child, is_female, pclass):
+    if is_child:
+        qc.x(QPOS_ISCHILD)
+
+    if is_female:
+        qc.x(QPOS_SEX)
+    
+    qc.x(QPOS_FIRST if pclass == 1 else (QPOS_SECOND if pclass == 2 else QPOS_THIRD))
+
+# Getting the trained QBN 
+def get_trained_qbn(passengers, params):
+
+    prepared_passengers = prepare_data(passengers, params)
+    norm_params = calculate_norm_params(prepared_passengers)
+    surv_params = calculate_surv_params(prepared_passengers)
+
+    def trained_qbn_titanic(passenger):
+        (is_child, is_female, pclass) = passenger
+
+        def circuit(qc, qr, cr):
+            apply_known(qc, is_child, is_female, pclass)
+            apply_norm(qc, norm_params)
+            apply_survival(qc, surv_params)
+            
+            qc.measure(qr[QPOS_SURV], cr[0])
+        
+        return as_pqc(QUBITS, circuit, hist=False, measure=True, shots=100)
+
+    return trained_qbn_titanic
+
+# 
+def post_process(counts):
+    """
+    counts -- the result of the quantum circuit execution
+    returns the prediction
+    """
+    #print (counts)
+    p_surv = counts['1'] if '1' in counts.keys() else 0
+    p_died = counts['0'] if '0' in counts.keys() else 0
+
+    #return int(list(map(lambda item: item[0], counts.items()))[0])
+    return 1 if p_surv > p_died else 0
+
+# REDEFINE OR IMPORT THE FUNCTIONS OF CHAPTER 2
+
+def run(f_classify, x):
+    return list(map(f_classify, x))
+
+def specificity(matrix):
+    return matrix[0][0]/(matrix[0][0]+matrix[0][1]) if (matrix[0][0]+matrix[0][1] > 0) else 0
+
+def npv(matrix):
+    return matrix[0][0]/(matrix[0][0]+matrix[1][0]) if (matrix[0][0]+matrix[1][0] > 0) else 0
+
+def classifier_report(name, run, classify, input, labels):
+    cr_predictions = run(classify, input)
+    cr_cm = confusion_matrix(labels, cr_predictions)
+
+    cr_precision = precision_score(labels, cr_predictions)
+    cr_recall = recall_score(labels, cr_predictions)
+    cr_specificity = specificity(cr_cm)
+    cr_npv = npv(cr_cm)
+    cr_level = 0.25*(cr_precision + cr_recall + cr_specificity + cr_npv)
+
+    print('The precision score of the {} classifier is {:.2f}'
+        .format(name, cr_precision))
+    print('The recall score of the {} classifier is {:.2f}'
+        .format(name, cr_recall))
+    print('The specificity score of the {} classifier is {:.2f}'
+        .format(name, cr_specificity))
+    print('The npv score of the {} classifier is {:.2f}'
+        .format(name, cr_npv))
+    print('The information level is: {:.2f}'
+        .format(cr_level))
+#CAPTION A reusable function to unmask the hypocrite classifier
+
+# Running the Quantum Naive Bayes Classifier
+def run(f_classify, data):
+    return [f_classify(data.iloc[i]) for i in range(0,len(data))]
+
+# get the simple qbn
+trained_qbn = get_trained_qbn(train, trained_params)
+
+# evaluate the Quantum Bayesian Network
+classifier_report("QBN",
+    run,
+    lambda passenger: post_process(trained_qbn(pre_process(passenger))),
+    passengers,
+    train['Survived'])
